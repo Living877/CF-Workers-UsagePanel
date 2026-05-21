@@ -152,6 +152,10 @@
 |--------|------|---------|--------|------|
 | `PASSWORD` | String | ✅ **必须** | 无 | 管理员密码,用于登录管理面板。**强烈建议使用强密码** |
 | `USERNAME` | String | ⚪ 可选 | `admin` | 管理员账号名 |
+| `ACCOUNT_CHECK_INTERVAL_MINUTES` | Number | ⚪ 可选 | `20` | 单账号最短刷新间隔，未超过时使用历史数据 |
+| `MAX_ACCOUNT_REFRESH_PER_RUN` | Number | ⚪ 可选 | `48` | 每次汇总最多刷新账号数，最大不会超过 48 |
+| `DIRECT_ACCOUNT_REFRESH_PER_RUN` | Number | ⚪ 可选 | `8` | 无法自调用时的直接查询账号上限，最大不会超过 8 |
+| `SELF_URL` | String | ⚪ 可选 | 无 | 定时任务自调用地址，例如 `https://your-worker.workers.dev`；未设置时定时任务会用较小的直接查询上限 |
 
 
 **⚠️ 重要提示:**
@@ -231,6 +235,7 @@
     "AccountID": "6d7***************************90",
     "APIToken": "duN***********************************fs",
     "UpdateTime": 1736455698819,
+    "LastCheckTime": 1736455698819,
     "Usage": {
       "success": true,
       "pages": 10900,
@@ -326,7 +331,8 @@ curl https://your-worker.workers.dev/usage.json?token=ADMIN_TOKEN
 | `/api/login` | POST | 管理员登录接口 | 无 |
 | `/api/add` | POST | 添加 CF 账号 | Cookie 认证 |
 | `/api/del` | POST | 删除 CF 账号 | Cookie 认证 |
-| `/api/check` | POST | 检查单个账号免费额度用量 | Cookie 认证 |
+| `/api/check?id=账号ID` | GET | 汇总更新时由 `/usage.json` 内部自调用；未超过刷新阈值时返回历史数据 | 内部 Token |
+| `/api/check?id=账号ID` | POST | 管理员手动按账号 ID 检查免费额度用量；未超过刷新阈值时返回历史数据；兼容旧的 `AccountID/APIToken` 或 `Email/GlobalAPIKey` 查询参数 | Cookie 认证 |
 | `/admin/config.json` | GET | 获取账号配置列表 | Cookie 认证 |
 | `/admin/usage.json` | GET | 获取最新汇总使用数据 | Cookie 认证 |
 | `/usage.json` | GET | 公开的使用数据接口 | Token 参数 |
