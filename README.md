@@ -2,9 +2,9 @@
 
 <div align="center">
 
-📊 **Cloudflare Workers/Pages 请求数统计面板**
+📊 **Cloudflare Workers/Pages/D1/KV/R2 免费额度统计面板**
 
-一个优雅、现代的 Cloudflare Workers/Pages 请求量监控仪表板
+一个优雅、现代的 Cloudflare 免费额度监控仪表板
 
 [![License](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
 [![Cloudflare Workers](https://img.shields.io/badge/Cloudflare-Workers-orange.svg)](https://workers.cloudflare.com/)
@@ -16,7 +16,7 @@
 
 ## 📖 项目简介
 
-**CF-Workers-UsagePanel** 是一个基于 Cloudflare Workers 构建的请求量统计监控面板,帮助您实时追踪和管理多个 Cloudflare 账户的 Workers 和 Pages 请求使用情况。
+**CF-Workers-UsagePanel** 是一个基于 Cloudflare Workers 构建的免费额度统计监控面板,帮助您实时追踪和管理多个 Cloudflare 账户的 Workers、Pages、D1、Workers KV 和 R2 使用情况。
 
 ### 为什么需要这个面板?
 
@@ -51,7 +51,10 @@
 - **实时数据展示**
   - Workers 请求数统计
   - Pages 请求数统计
-  - 总请求数及使用百分比
+  - D1 行读取、行写入和存储统计
+  - Workers KV 读、写、删除、列表和存储统计
+  - R2 Class A、Class B 操作和存储统计
+  - 总请求数及各项免费额度使用百分比
   - 可视化进度条展示
 
 - **多账号管理**
@@ -61,6 +64,7 @@
 
 - **自动更新机制**
   - 过期自动更新
+  - D1/KV 按 UTC 当日统计,R2 操作按当月统计
   - 数据持久化存储在 KV
 
 - **管理员系统**
@@ -179,7 +183,40 @@
   "workers": 9670,
   "total": 20570,
   "max": 200000,
-  "msg": "✅ 成功加载请求数使用数据"
+  "resources": {
+    "d1": {
+      "rowsRead": 120000,
+      "rowsReadLimit": 10000000,
+      "rowsWritten": 800,
+      "rowsWrittenLimit": 200000,
+      "storageBytes": 18874368,
+      "storageLimitBytes": 10737418240,
+      "period": "day"
+    },
+    "kv": {
+      "reads": 15600,
+      "readsLimit": 200000,
+      "writes": 18,
+      "writesLimit": 2000,
+      "deletes": 0,
+      "deletesLimit": 2000,
+      "lists": 3,
+      "listsLimit": 2000,
+      "storageBytes": 5242880,
+      "storageLimitBytes": 2147483648,
+      "period": "day"
+    },
+    "r2": {
+      "classA": 2400,
+      "classALimit": 2000000,
+      "classB": 86000,
+      "classBLimit": 20000000,
+      "storageBytes": 268435456,
+      "storageLimitBytes": 21474836480,
+      "period": "month"
+    }
+  },
+  "msg": "✅ 成功加载免费额度使用数据"
 }
 ```
 
@@ -199,7 +236,12 @@
       "pages": 10900,
       "workers": 9670,
       "total": 20570,
-      "max": 100000
+      "max": 100000,
+      "resources": {
+        "d1": { "rowsRead": 86000, "rowsReadLimit": 5000000, "rowsWritten": 500, "rowsWrittenLimit": 100000, "storageBytes": 12582912, "storageLimitBytes": 5368709120 },
+        "kv": { "reads": 10200, "readsLimit": 100000, "writes": 12, "writesLimit": 1000, "deletes": 0, "deletesLimit": 1000, "lists": 2, "listsLimit": 1000, "storageBytes": 3145728, "storageLimitBytes": 1073741824 },
+        "r2": { "classA": 1600, "classALimit": 1000000, "classB": 52000, "classBLimit": 10000000, "storageBytes": 167772160, "storageLimitBytes": 10737418240, "period": "month" }
+      }
     }
   }
 ]
@@ -225,7 +267,7 @@
 2. 填写以下信息:
    - **账号名称**: 自定义名称
    - **Account ID**: 在 Cloudflare Dashboard 右侧可以找到
-   - **API Token**: 创建一个具有 **Analytics:Read** 权限的 Token
+   - **API Token**: 创建一个具有 **Account → Analytics → Read** 权限的 Token
 3. 点击 **确认添加**
 
 **创建 API Token:**
@@ -247,13 +289,13 @@
 #### 在管理面板查看
 
 - 登录后自动显示所有账号的使用情况
-- 可以看到每个账号的 Workers、Pages 和总请求数
+- 可以看到每个账号的 Workers、Pages、D1、KV、R2 使用明细
 
 #### 在主页查看
 
 - 访问 `https://your-worker.workers.dev/`
 - 显示所有账号的汇总数据
-- 包含总使用量、百分比、详细统计
+- 包含 Workers/Pages 总请求量以及 D1、KV、R2 免费额度占比
 
 #### 通过 API 获取
 
@@ -279,14 +321,14 @@ curl https://your-worker.workers.dev/usage.json?token=ADMIN_TOKEN
 
 | 路径 | 方法 | 说明 | 认证要求 |
 |------|------|------|---------|
-| `/` | GET | 主页,显示总请求数据 | 无 |
+| `/` | GET | 主页,显示汇总免费额度数据 | 无 |
 | `/admin` | GET | 管理面板 | Cookie 认证 |
 | `/api/login` | POST | 管理员登录接口 | 无 |
 | `/api/add` | POST | 添加 CF 账号 | Cookie 认证 |
 | `/api/del` | POST | 删除 CF 账号 | Cookie 认证 |
-| `/api/check` | POST | 检查单个账号请求量 | Cookie 认证 |
+| `/api/check` | POST | 检查单个账号免费额度用量 | Cookie 认证 |
 | `/admin/config.json` | GET | 获取账号配置列表 | Cookie 认证 |
-| `/admin/usage.json` | GET | 获取最新使用数据 | Cookie 认证 |
+| `/admin/usage.json` | GET | 获取最新汇总使用数据 | Cookie 认证 |
 | `/usage.json` | GET | 公开的使用数据接口 | Token 参数 |
 | `/robots.txt` | GET | 搜索引擎爬虫规则 | 无 |
 
@@ -358,7 +400,7 @@ curl https://your-worker.workers.dev/usage.json?token=ADMIN_TOKEN
 - **前端**: 原生 HTML + CSS + JavaScript
 - **字体**: Google Fonts (Outfit)
 - **图标**: SVG
-- **API**: Cloudflare GraphQL API
+- **API**: Cloudflare GraphQL Analytics API
 
 ---
 
@@ -396,7 +438,7 @@ curl https://your-worker.workers.dev/usage.json?token=ADMIN_TOKEN
 - Cloudflare API 访问失败
 
 **解决:**
-1. 检查 API Token 是否有 Analytics:Read 权限
+1. 检查 API Token 是否有 `Account → Analytics → Read` 权限
 2. 确认 Account ID 正确
 3. 等待定时任务执行或手动刷新
 
@@ -409,11 +451,13 @@ curl https://your-worker.workers.dev/usage.json?token=ADMIN_TOKEN
 **方法二:手动刷新**
 - 进入管理面板点击 **🔄 手动刷新**
 
-### 6. 请求数不准确?
+### 6. 免费额度数据不准确?
 
 **说明:**
-- 数据来源于 Cloudflare GraphQL API
-- 统计的是当天 UTC 0:00 到当前时间的请求数
+- 数据来源于 Cloudflare GraphQL Analytics API
+- Workers/Pages、D1、KV 统计的是当天 UTC 0:00 到当前时间的数据
+- R2 Class A / Class B 操作按当前 UTC 月统计
+- D1/KV/R2 存储为最近一次指标快照,不是当天累计量
 - 可能有轻微延迟(通常 5-10 分钟)
 
 ### 7. 如何迁移到新的 Worker?

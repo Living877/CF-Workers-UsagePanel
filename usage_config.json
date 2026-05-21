@@ -1,33 +1,122 @@
 [
-    {
-        "ID": 0,
-        "Name": "示例账号1",
-        "Email": null,
-        "GlobalAPIKey": null,
-        "AccountID": "6d7***************************90",
-        "APIToken": "duN***********************************fs",
-        "UpdateTime": 1767972698819,
-        "Usage": {
-            "success": true,
-            "pages": 10900,
-            "workers": 9670,
-            "total": 20510,
-            "max": 100000
+  {
+    "ID": 0,
+    "Name": "示例账号1",
+    "Email": null,
+    "GlobalAPIKey": null,
+    "AccountID": "6d7***************************90",
+    "APIToken": "duN***********************************fs",
+    "UpdateTime": 1767972698819,
+    "Usage": {
+      "success": true,
+      "pages": 10900,
+      "workers": 9670,
+      "total": 20570,
+      "max": 100000,
+      "resources": {
+        "d1": {
+          "rowsRead": 86000,
+          "rowsReadLimit": 5000000,
+          "rowsWritten": 500,
+          "rowsWrittenLimit": 100000,
+          "readQueries": 2100,
+          "writeQueries": 80,
+          "storageBytes": 12582912,
+          "storageLimitBytes": 5368709120,
+          "databases": 1,
+          "period": "day"
+        },
+        "kv": {
+          "reads": 10200,
+          "readsLimit": 100000,
+          "writes": 12,
+          "writesLimit": 1000,
+          "deletes": 0,
+          "deletesLimit": 1000,
+          "lists": 2,
+          "listsLimit": 1000,
+          "operations": 10214,
+          "storageBytes": 3145728,
+          "storageLimitBytes": 1073741824,
+          "keys": 140,
+          "namespaces": 2,
+          "period": "day"
+        },
+        "r2": {
+          "classA": 1600,
+          "classALimit": 1000000,
+          "classB": 52000,
+          "classBLimit": 10000000,
+          "free": 80,
+          "other": 0,
+          "operations": 53680,
+          "storageBytes": 167772160,
+          "storageLimitBytes": 10737418240,
+          "objects": 1100,
+          "buckets": 1,
+          "period": "month"
         }
-    },{
-        "ID": 1,
-        "Name": "示例账号2",
-        "Email": null,
-        "GlobalAPIKey": null,
-        "AccountID": "b1c***************************3e",
-        "APIToken": "pXq***********************************z8",
-        "UpdateTime": 1767972698820,
-        "Usage": {
-            "success": true,
-            "pages": 4500,
-            "workers": 3200,
-            "total": 7700,
-            "max": 100000
-        }
+      }
     }
+  },
+  {
+    "ID": 1,
+    "Name": "示例账号2",
+    "Email": null,
+    "GlobalAPIKey": null,
+    "AccountID": "b1c***************************3e",
+    "APIToken": "pXq***********************************z8",
+    "UpdateTime": 1767972698820,
+    "Usage": {
+      "success": true,
+      "pages": 4500,
+      "workers": 3200,
+      "total": 7700,
+      "max": 100000,
+      "resources": {
+        "d1": {
+          "rowsRead": 34000,
+          "rowsReadLimit": 5000000,
+          "rowsWritten": 300,
+          "rowsWrittenLimit": 100000,
+          "readQueries": 1100,
+          "writeQueries": 40,
+          "storageBytes": 6291456,
+          "storageLimitBytes": 5368709120,
+          "databases": 1,
+          "period": "day"
+        },
+        "kv": {
+          "reads": 5400,
+          "readsLimit": 100000,
+          "writes": 6,
+          "writesLimit": 1000,
+          "deletes": 0,
+          "deletesLimit": 1000,
+          "lists": 1,
+          "listsLimit": 1000,
+          "operations": 5407,
+          "storageBytes": 2097152,
+          "storageLimitBytes": 1073741824,
+          "keys": 90,
+          "namespaces": 1,
+          "period": "day"
+        },
+        "r2": {
+          "classA": 800,
+          "classALimit": 1000000,
+          "classB": 34000,
+          "classBLimit": 10000000,
+          "free": 40,
+          "other": 0,
+          "operations": 34840,
+          "storageBytes": 100663296,
+          "storageLimitBytes": 10737418240,
+          "objects": 700,
+          "buckets": 1,
+          "period": "month"
+        }
+      }
+    }
+  }
 ]
