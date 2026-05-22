@@ -18,7 +18,6 @@ export default {
             const 管理员TOKEN = await MD5MD5(面板管理员密码 + 面板管理员账号);
             const 临时TOKEN = await MD5MD5(url.hostname + 管理员TOKEN + UA);
             const 管理员COOKIE = await MD5MD5(管理员TOKEN + UA);
-            const 内部CheckTOKEN = await 创建内部CheckTOKEN(管理员TOKEN, url.hostname);
 
             // 验证管理员Cookie的函数
             const 验证管理员Cookie = () => {
@@ -26,17 +25,18 @@ export default {
                 const cookieMatch = cookies.match(/admin_token=([^;]+)/);
                 return cookieMatch && cookieMatch[1] === 管理员COOKIE;
             };
-            const 验证内部CheckTOKEN = () => url.searchParams.get('token') === 内部CheckTOKEN;
 
             if (访问路径 == 'usage.json') {// 请求数使用数据接口 Usage.json
                 let usage_json = 创建默认Usage(false);
                 if (url.searchParams.get('token') === 临时TOKEN || url.searchParams.get('token') === 管理员TOKEN) {
                     const 当前时间 = Date.now();
-                    usage_json = 补全Usage结构(await env.KV.get('usage.json', { type: 'json' }) || usage_json);
+                    const 已保存Usage = await env.KV.get('usage.json', { type: 'json' });
+                    const 已保存更新时间 = Number(已保存Usage?.UpdateTime || 0) || 0;
+                    usage_json = 补全Usage结构(已保存Usage || {});
                     usage_json.success = true;
                     usage_json.total = (usage_json.pages || 0) + (usage_json.workers || 0);
                     usage_json.msg = '✅ 成功加载免费额度使用数据';
-                    if (!usage_json.UpdateTime || (当前时间 - usage_json.UpdateTime) > 获取单账号查询间隔毫秒(env)) usage_json = await 更新请求数(env, { selfUrl: request.url, internalToken: 内部CheckTOKEN });
+                    if (!已保存更新时间 || (当前时间 - 已保存更新时间) > 获取单账号查询间隔毫秒(env)) usage_json = await 更新请求数(env);
                 }
                 return new Response(JSON.stringify(usage_json, null, 2), { headers: { 'Content-Type': 'application/json;charset=UTF-8', 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'GET, POST, OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type' } });
             } else if (访问路径 == 'admin' || 访问路径.startsWith('admin/')) {// 管理员面板
@@ -44,15 +44,19 @@ export default {
                 if (验证管理员Cookie()) {
                     if (区分大小写访问路径 === 'admin/config.json') {
                         const usage_config_json = await env.KV.get('usage_config.json', { type: 'json' }) || [];
-                        const masked_config_json = usage_config_json.map(item => ({
-                            ...item,
-                            Usage: 补全Usage结构(item.Usage || {}),
-                            GlobalAPIKey: item.GlobalAPIKey ? 掩码敏感信息(item.GlobalAPIKey) : null,
-                            APIToken: item.APIToken ? 掩码敏感信息(item.APIToken) : null
-                        }));
+                        const masked_config_json = usage_config_json.map(item => {
+                            const updateTime = 获取账号最后更新时间(item);
+                            return {
+                                ...item,
+                                UpdateTime: updateTime || item.UpdateTime,
+                                Usage: 补全账号Usage结构(item),
+                                GlobalAPIKey: item.GlobalAPIKey ? 掩码敏感信息(item.GlobalAPIKey) : null,
+                                APIToken: item.APIToken ? 掩码敏感信息(item.APIToken) : null
+                            };
+                        });
                         return new Response(JSON.stringify(masked_config_json, null, 2), { status: 200, headers: { 'Content-Type': 'application/json;charset=UTF-8' } });
                     } else if (区分大小写访问路径 === 'admin/usage.json') {
-                        const usage_json = await 更新请求数(env, { selfUrl: request.url, internalToken: 内部CheckTOKEN, force: url.searchParams.get('force') === '1' });
+                        const usage_json = await 更新请求数(env, { force: url.searchParams.get('force') === '1' });
                         return new Response(JSON.stringify(usage_json, null, 2), { headers: { 'Content-Type': 'application/json;charset=UTF-8' } });
                     }
 
@@ -91,18 +95,10 @@ export default {
                     }
                 }
 
-                const 是Check请求 = 区分大小写访问路径 === 'api/check';
-                const 是内部Check请求 = 是Check请求 && 验证内部CheckTOKEN();
-                if (是Check请求 && request.method !== 'GET' && request.method !== 'POST') {
+                if (request.method !== 'POST') {
                     return new Response(JSON.stringify({ success: false, msg: 'Method Not Allowed' }), { status: 405, headers: { 'Content-Type': 'application/json;charset=UTF-8' } });
                 }
-                if (是Check请求 && request.method === 'GET' && !是内部Check请求) {
-                    return new Response(JSON.stringify({ success: false, msg: 'GET /api/check 仅供内部汇总调用，请在管理面板中使用 POST 检查账号' }), { status: 403, headers: { 'Content-Type': 'application/json;charset=UTF-8' } });
-                }
-                if ((!是Check请求 || request.method === 'POST') && !验证管理员Cookie()) return new Response(null, { status: 302, headers: { 'Location': '/' } });
-                if (!是Check请求 && request.method !== 'POST') {
-                    return new Response(JSON.stringify({ success: false, msg: 'Method Not Allowed' }), { status: 405, headers: { 'Content-Type': 'application/json;charset=UTF-8' } });
-                }
+                if (!验证管理员Cookie()) return new Response(null, { status: 302, headers: { 'Location': '/' } });
 
                 if (区分大小写访问路径 === 'api/logout') {// 登出接口
                     return new Response(JSON.stringify({ success: true, msg: '登出成功' }), {
@@ -143,9 +139,9 @@ export default {
                             return new Response(JSON.stringify({ success: false, msg: '无法验证该CF账号的API信息' }), { status: 400, headers: { 'Content-Type': 'application/json;charset=utf-8' } });
                         }
 
-                        CF_JSON.Usage = usage_result;
                         CF_JSON.UpdateTime = Date.now();
                         CF_JSON.LastCheckTime = CF_JSON.UpdateTime;
+                        CF_JSON.Usage = 补全账号Usage结构({ ...CF_JSON, Usage: usage_result });
 
                         // 读取现有配置
                         let usage_config_json = await env.KV.get('usage_config.json', { type: 'json' });
@@ -223,22 +219,7 @@ export default {
 
                 } else if (区分大小写访问路径 === 'api/check' && !演示样板) {// 检查单个CF账号请求量接口
                     try {
-                        const accountId = url.searchParams.get('id') || url.searchParams.get('ID');
-                        const force = url.searchParams.get('force') === '1';
-                        const save = url.searchParams.get('save') !== '0';
-                        let Usage_JSON;
-                        if (accountId !== null && accountId !== '') {
-                            const checkResult = await 查询并更新单账号(env, accountId, {
-                                force,
-                                save,
-                                thresholdMs: 获取单账号查询间隔毫秒(env)
-                            });
-                            Usage_JSON = checkResult.usage;
-                        } else if (request.method === 'GET') {
-                            return new Response(JSON.stringify({ success: false, msg: 'GET /api/check 缺少账号 id' }), { status: 400, headers: { 'Content-Type': 'application/json;charset=utf-8' } });
-                        } else {
-                            Usage_JSON = await getCloudflareUsage(url.searchParams.get('Email'), url.searchParams.get('GlobalAPIKey'), url.searchParams.get('AccountID'), url.searchParams.get('APIToken'));
-                        }
+                        const Usage_JSON = await getCloudflareUsage(url.searchParams.get('Email'), url.searchParams.get('GlobalAPIKey'), url.searchParams.get('AccountID'), url.searchParams.get('APIToken'));
                         return new Response(JSON.stringify(Usage_JSON, null, 2), { status: 200, headers: { 'Content-Type': 'application/json' } });
                     } catch (err) {
                         const errorResponse = { msg: '查询请求量失败，失败原因：' + err.message, error: err.message };
@@ -261,9 +242,7 @@ export default {
     async scheduled(event, env, ctx) {
         // 定时执行请求数更新
         ctx.waitUntil((async () => {
-            const selfUrl = 获取自调用地址(env);
-            const internalToken = selfUrl ? await 创建环境内部CheckTOKEN(env, new URL(selfUrl).hostname) : null;
-            await 更新请求数(env, { selfUrl, internalToken });
+            await 更新请求数(env);
         })());
     }
 };
@@ -285,8 +264,7 @@ const 免费额度 = {
 };
 
 const 默认单账号查询间隔毫秒 = 20 * 60 * 1000;
-const 默认每次最多刷新账号数 = 48;
-const 默认直接查询最多账号数 = 8;
+const 默认每轮最多外部子请求数 = 50;
 
 const R2_CLASS_A_ACTIONS = new Set([
     'listbuckets', 'putbucket', 'listobjects', 'listobjectsv2', 'putobject', 'copyobject',
@@ -387,13 +365,16 @@ function 合并资源统计(base, extra = {}) {
 }
 
 function 补全Usage结构(usage) {
+    const source = usage || {};
     const base = 创建默认Usage(false);
-    const normalized = { ...base, ...(usage || {}) };
-    const hasResourceData = !!(usage && usage.resources);
+    const normalized = { ...base, ...source };
+    const updateTime = Number(source.UpdateTime || 0) || 0;
+    const hasResourceData = !!source.resources;
     normalized.pages = Number(normalized.pages) || 0;
     normalized.workers = Number(normalized.workers) || 0;
     normalized.total = Number(normalized.total) || normalized.pages + normalized.workers;
     normalized.max = Number(normalized.max) || 免费额度.requestsDaily;
+    normalized.UpdateTime = updateTime;
     normalized.resources = 合并资源统计(hasResourceData ? 创建默认资源统计() : 创建汇总资源统计(), normalized.resources || {});
     return normalized;
 }
@@ -464,26 +445,32 @@ function 获取单账号查询间隔毫秒(env = {}) {
     return 默认单账号查询间隔毫秒;
 }
 
-function 获取每次最多刷新账号数(env = {}) {
-    const configured = Number(env.MAX_ACCOUNT_REFRESH_PER_RUN || env.max_account_refresh_per_run);
-    if (Number.isFinite(configured) && configured > 0) return Math.min(Math.max(1, Math.floor(configured)), 默认每次最多刷新账号数);
-    return 默认每次最多刷新账号数;
+function 获取每轮最多外部子请求数(env = {}) {
+    const configured = Number(env.MAX_EXTERNAL_SUBREQUESTS_PER_RUN || env.max_external_subrequests_per_run);
+    if (Number.isFinite(configured) && configured > 0) return Math.min(Math.max(1, Math.floor(configured)), 默认每轮最多外部子请求数);
+    return 默认每轮最多外部子请求数;
 }
 
-function 获取直接查询最多账号数(env = {}) {
-    const configured = Number(env.DIRECT_ACCOUNT_REFRESH_PER_RUN || env.direct_account_refresh_per_run);
-    if (Number.isFinite(configured) && configured > 0) return Math.min(Math.max(1, Math.floor(configured)), 默认直接查询最多账号数);
-    return 默认直接查询最多账号数;
+function 估算账号查询外部子请求数(account = {}) {
+    if (account.AccountID) return 4;
+    if (account.Email && account.GlobalAPIKey) return 5;
+    return 5;
 }
 
-function 获取账号上次查询时间(account) {
-    return Number(account?.LastCheckTime || account?.UpdateTime || account?.Usage?.UpdateTime || 0) || 0;
+function 获取账号最后更新时间(account) {
+    return Number(account?.UpdateTime || account?.Usage?.UpdateTime || 0) || 0;
+}
+
+function 补全账号Usage结构(account) {
+    const usage = 补全Usage结构(account?.Usage || {});
+    delete usage.UpdateTime;
+    return usage;
 }
 
 function 写入账号查询结果(account, usage, queryTime = Date.now()) {
     const normalized = 补全Usage结构(usage || {});
     normalized.UpdateTime = queryTime;
-    account.Usage = normalized;
+    account.Usage = 补全账号Usage结构({ ...account, Usage: normalized });
     account.UpdateTime = queryTime;
     account.LastCheckTime = queryTime;
     delete account.LastCheckError;
@@ -492,102 +479,13 @@ function 写入账号查询结果(account, usage, queryTime = Date.now()) {
 }
 
 function 写入账号查询失败(account, error, queryTime = Date.now()) {
+    const lastUpdateTime = 获取账号最后更新时间(account);
+    if (lastUpdateTime && !account.UpdateTime) account.UpdateTime = lastUpdateTime;
     account.LastCheckTime = queryTime;
     account.LastCheckErrorTime = queryTime;
     account.LastCheckError = typeof error === 'string' ? error : (error?.msg || error?.message || '查询失败');
-    account.Usage = 补全Usage结构(account.Usage || {});
+    account.Usage = 补全账号Usage结构(account);
     return account.Usage;
-}
-
-async function 创建内部CheckTOKEN(管理员TOKEN, hostname) {
-    return await MD5MD5(`${管理员TOKEN}:${hostname}:api/check`);
-}
-
-async function 创建环境内部CheckTOKEN(env, hostname) {
-    const 面板管理员账号 = env.USER || env.user || env.USERNAME || env.username || 'admin';
-    const 面板管理员密码 = env.ADMIN || env.admin || env.PASSWORD || env.password || env.pswd;
-    if (!面板管理员密码 || !hostname) return null;
-
-    const 管理员TOKEN = await MD5MD5(面板管理员密码 + 面板管理员账号);
-    return await 创建内部CheckTOKEN(管理员TOKEN, hostname);
-}
-
-function 获取自调用地址(env = {}) {
-    const rawUrl = env.SELF_URL || env.self_url || env.WORKER_URL || env.worker_url || env.USAGE_PANEL_URL || env.usage_panel_url;
-    if (!rawUrl) return null;
-
-    try {
-        return new URL(rawUrl).toString();
-    } catch (error) {
-        try {
-            return new URL(`https://${rawUrl}`).toString();
-        } catch (innerError) {
-            console.warn('SELF_URL/WORKER_URL 配置无效，定时任务将退回直接查询:', rawUrl);
-            return null;
-        }
-    }
-}
-
-async function 查询并更新单账号(env, accountId, options = {}) {
-    const save = options.save !== false;
-    const thresholdMs = Number(options.thresholdMs) || 获取单账号查询间隔毫秒(env);
-    const now = Date.now();
-    let usage_config_json = await env.KV.get('usage_config.json', { type: 'json' });
-    if (!Array.isArray(usage_config_json)) throw new Error('配置列表为空，无法查询账号');
-
-    const targetIndex = usage_config_json.findIndex(item => String(item.ID) === String(accountId));
-    if (targetIndex === -1) throw new Error(`未找到ID为 ${accountId} 的账号`);
-
-    const account = usage_config_json[targetIndex];
-    const lastCheckTime = 获取账号上次查询时间(account);
-    const cachedUsage = 补全Usage结构(account.Usage || {});
-    let shouldSaveBackfill = false;
-    account.Usage = cachedUsage;
-    if (lastCheckTime && !account.LastCheckTime) {
-        account.LastCheckTime = lastCheckTime;
-        shouldSaveBackfill = true;
-    }
-
-    if (!options.force && lastCheckTime && now - lastCheckTime <= thresholdMs) {
-        if (!account.UpdateTime) {
-            account.UpdateTime = lastCheckTime;
-            shouldSaveBackfill = true;
-        }
-        if (save && shouldSaveBackfill) {
-            await env.KV.put('usage_config.json', JSON.stringify(usage_config_json));
-        }
-        return { usage: cachedUsage, account, updated: false, fromCache: true };
-    }
-
-    const usage = await getCloudflareUsage(account.Email, account.GlobalAPIKey, account.AccountID, account.APIToken);
-    if (!usage.success) {
-        写入账号查询失败(account, usage, Date.now());
-        if (save) await env.KV.put('usage_config.json', JSON.stringify(usage_config_json));
-        return { usage, account, updated: false, fromCache: false, failed: true };
-    }
-
-    const normalized = 写入账号查询结果(account, usage, Date.now());
-    if (save) await env.KV.put('usage_config.json', JSON.stringify(usage_config_json));
-    return { usage: normalized, account, updated: true, fromCache: false };
-}
-
-async function 通过内部接口查询账号(selfUrl, internalToken, accountId) {
-    const checkUrl = new URL('/api/check', selfUrl);
-    checkUrl.searchParams.set('id', accountId);
-    checkUrl.searchParams.set('token', internalToken);
-    checkUrl.searchParams.set('force', '1');
-    checkUrl.searchParams.set('save', '0');
-
-    const response = await fetch(checkUrl.toString(), { method: 'GET', headers: { 'Accept': 'application/json' } });
-    const bodyText = await response.text();
-    let body;
-    try {
-        body = JSON.parse(bodyText);
-    } catch (error) {
-        throw new Error(`内部查询接口返回了非 JSON 响应: ${bodyText.slice(0, 120)}`);
-    }
-    if (!response.ok) throw new Error(body.msg || body.error || `内部查询接口 HTTP ${response.status}`);
-    return 补全Usage结构(body);
 }
 
 async function 更新请求数(env, options = {}) {
@@ -604,34 +502,35 @@ async function 更新请求数(env, options = {}) {
         await env.KV.put('usage.json', JSON.stringify(usage_json));
     } else if (Array.isArray(usage_config_json) && usage_config_json.length > 0) {
         const thresholdMs = Number(options.thresholdMs) || 获取单账号查询间隔毫秒(env);
-        const maxRefresh = 获取每次最多刷新账号数(env);
+        const externalSubrequestLimit = 获取每轮最多外部子请求数(env);
         const now = Date.now();
-        const selfUrl = options.selfUrl || 获取自调用地址(env);
-        let internalToken = options.internalToken || null;
-        if (selfUrl && !internalToken) internalToken = await 创建环境内部CheckTOKEN(env, new URL(selfUrl).hostname);
-        const 使用内部接口 = !!(selfUrl && internalToken);
-        const refreshLimit = 使用内部接口 ? maxRefresh : Math.min(maxRefresh, 获取直接查询最多账号数(env));
 
         const accountStates = usage_config_json.map((account, index) => {
-            account.Usage = 补全Usage结构(account.Usage || {});
-            const lastCheckTime = 获取账号上次查询时间(account);
-            if (lastCheckTime && !account.LastCheckTime) account.LastCheckTime = lastCheckTime;
-            return { account, index, lastCheckTime };
+            const lastUpdateTime = 获取账号最后更新时间(account);
+            account.Usage = 补全账号Usage结构(account);
+            if (lastUpdateTime && !account.UpdateTime) account.UpdateTime = lastUpdateTime;
+            if (lastUpdateTime && !account.LastCheckTime) account.LastCheckTime = lastUpdateTime;
+            return { account, index, lastUpdateTime };
         });
 
         const expiredAccounts = accountStates
-            .filter(item => options.force || !item.lastCheckTime || now - item.lastCheckTime > thresholdMs)
-            .sort((a, b) => (a.lastCheckTime || 0) - (b.lastCheckTime || 0));
-        const accountsToRefresh = expiredAccounts.slice(0, refreshLimit);
+            .filter(item => options.force || !item.lastUpdateTime || now - item.lastUpdateTime > thresholdMs)
+            .sort((a, b) => (a.lastUpdateTime || 0) - (b.lastUpdateTime || 0));
+        const accountsToRefresh = [];
+        let estimatedExternalSubrequests = 0;
+        for (const item of expiredAccounts) {
+            const accountSubrequests = 估算账号查询外部子请求数(item.account);
+            if (estimatedExternalSubrequests + accountSubrequests > externalSubrequestLimit) continue;
+            accountsToRefresh.push({ ...item, estimatedExternalSubrequests: accountSubrequests });
+            estimatedExternalSubrequests += accountSubrequests;
+        }
 
         let refreshedCount = 0;
         let failedRefreshCount = 0;
 
         await Promise.all(accountsToRefresh.map(async ({ account }) => {
             try {
-                const usage = 使用内部接口
-                    ? await 通过内部接口查询账号(selfUrl, internalToken, account.ID)
-                    : await getCloudflareUsage(account.Email, account.GlobalAPIKey, account.AccountID, account.APIToken);
+                const usage = await getCloudflareUsage(account.Email, account.GlobalAPIKey, account.AccountID, account.APIToken);
                 if (!usage.success) {
                     写入账号查询失败(account, usage, Date.now());
                     failedRefreshCount += 1;
@@ -653,7 +552,7 @@ async function 更新请求数(env, options = {}) {
         const total_resources = 创建汇总资源统计();
 
         for (const account of usage_config_json) {
-            const usage = 补全Usage结构(account.Usage || {});
+            const usage = 补全账号Usage结构(account);
             account.Usage = usage;
             if (usage.success) {
                 total_pages += usage.pages || 0;
@@ -679,10 +578,11 @@ async function 更新请求数(env, options = {}) {
             failed: failedRefreshCount,
             cached: Math.max(usage_config_json.length - refreshedCount, 0),
             skippedByLimit: Math.max(expiredAccounts.length - accountsToRefresh.length, 0),
-            maxRefresh: refreshLimit,
-            configuredMaxRefresh: maxRefresh,
-            thresholdMs,
-            selfFetch: 使用内部接口
+            maxRefresh: accountsToRefresh.length,
+            externalSubrequestsEstimated: estimatedExternalSubrequests,
+            externalSubrequestLimit,
+            perAccountExternalSubrequests: { withAccountId: 4, withoutAccountId: 5 },
+            thresholdMs
         };
         usage_json.msg = failedRefreshCount > 0
             ? `⚠️ 部分账号查询失败（本次刷新 ${refreshedCount} 个账号，失败 ${failedRefreshCount} 个，${usage_json.RefreshStats.cached} 个使用历史数据）`
@@ -1176,13 +1076,14 @@ async function UsagePanel管理面板(TOKEN) {
         .quota-details { margin-top: 1.25rem; overflow: hidden; }
         .quota-details[open] { display: flex; flex-direction: column; }
         .quota-details.quota-animating .quota-summary { pointer-events: none; }
-        .quota-summary { list-style: none; background: var(--item-bg); border: 1px solid var(--stroke); border-radius: 14px; padding: 0.85rem 1rem; cursor: pointer; display: flex; justify-content: space-between; gap: 1rem; align-items: center; color: var(--text-main); font-size: 0.85rem; font-weight: 600; transition: all 0.3s ease; }
+        .quota-summary { list-style: none; background: linear-gradient(135deg, rgba(99, 102, 241, 0.16), rgba(14, 165, 233, 0.1)); border: 1px solid rgba(99, 102, 241, 0.5); border-radius: 14px; padding: 0.8rem 0.85rem; cursor: pointer; display: flex; justify-content: space-between; gap: 0.75rem; align-items: center; color: var(--text-main); font-size: 0.85rem; font-weight: 700; box-shadow: 0 12px 28px -18px var(--primary-glow), inset 0 1px 0 rgba(255,255,255,0.08); transition: all 0.3s ease; }
         .quota-summary::-webkit-details-marker { display: none; }
-        .quota-summary:hover { border-color: var(--primary); background: rgba(99, 102, 241, 0.08); }
-        .quota-summary::after { content: '展开'; color: var(--text-muted); font-size: 0.75rem; font-weight: 500; }
-        .quota-details[open] .quota-summary::after { content: '收起'; }
+        .quota-summary:hover, .quota-summary:focus-visible { border-color: var(--primary); background: linear-gradient(135deg, rgba(99, 102, 241, 0.24), rgba(14, 165, 233, 0.14)); box-shadow: 0 16px 32px -18px var(--primary-glow), 0 0 0 3px rgba(99, 102, 241, 0.12); outline: none; }
+        .quota-summary-title { min-width: 0; }
+        .quota-summary::after { content: '展开细节'; color: #fff; background: var(--primary); border-radius: 999px; padding: 0.38rem 0.7rem; font-size: 0.75rem; font-weight: 700; white-space: nowrap; box-shadow: 0 10px 20px -12px var(--primary-glow); }
+        .quota-details[open] .quota-summary::after { content: '收起细节'; }
         .quota-details[open] .quota-summary { order: 2; margin-top: 0.875rem; }
-        .quota-summary-meta { color: var(--text-muted); font-size: 0.75rem; font-weight: 500; }
+        .quota-summary-meta { color: var(--text-muted); font-size: 0.75rem; font-weight: 600; margin-left: auto; white-space: nowrap; }
         .quota-body { overflow: hidden; }
         .quota-details[open] .quota-body { order: 1; }
         .quota-details.quota-animating .quota-body { will-change: height, opacity, transform; }
@@ -1531,6 +1432,10 @@ async function UsagePanel管理面板(TOKEN) {
                 gap: 0.35rem;
             }
 
+            .quota-summary-meta {
+                margin-left: 0;
+            }
+
             .quota-group-meta {
                 text-align: left;
             }
@@ -1812,7 +1717,7 @@ async function UsagePanel管理面板(TOKEN) {
             const kv = resources.kv || {};
             const r2 = resources.r2 || {};
             return '<details class="quota-details">' +
-                '<summary class="quota-summary"><span>资源额度细节</span><span class="quota-summary-meta">KV / D1 / R2</span></summary>' +
+                '<summary class="quota-summary"><span class="quota-summary-title">资源额度细节</span><span class="quota-summary-meta">KV / D1 / R2</span></summary>' +
                 '<div class="quota-body"><div class="quota-list">' +
                     renderQuotaGroup('KV', formatNumber(kv.namespaces || 0) + ' 个命名空间', [
                         renderQuotaBar('读取（今日）', kv.reads, kv.readsLimit),
@@ -1992,7 +1897,7 @@ async function UsagePanel管理面板(TOKEN) {
                     const total = usage.total || 0;
                     const max = usage.max || 100000;
                     const percent = Math.min((total / max) * 100, 100).toFixed(1);
-                    const updateTimeValue = acc.LastCheckTime || acc.UpdateTime;
+                    const updateTimeValue = acc.UpdateTime || acc.LastCheckTime;
                     const updateTime = updateTimeValue ? new Date(updateTimeValue).toLocaleString() : '从未更新';
                     const percentColor = getGradientColor(percent);
                     const bgSize = percent > 0 ? (100 / percent) * 100 : 100;
@@ -2385,13 +2290,14 @@ async function UsagePanel主页(TOKEN) {
         .quota-details { margin-top: 1.25rem; overflow: hidden; }
         .quota-details[open] { display: flex; flex-direction: column; }
         .quota-details.quota-animating .quota-summary { pointer-events: none; }
-        .quota-summary { list-style: none; background: var(--item-bg); border: 1px solid var(--stroke); border-radius: 14px; padding: 0.85rem 1rem; cursor: pointer; display: flex; justify-content: space-between; gap: 1rem; align-items: center; color: var(--text-main); font-size: 0.85rem; font-weight: 600; transition: all 0.3s ease; }
+        .quota-summary { list-style: none; background: linear-gradient(135deg, rgba(99, 102, 241, 0.16), rgba(14, 165, 233, 0.1)); border: 1px solid rgba(99, 102, 241, 0.5); border-radius: 14px; padding: 0.8rem 0.85rem; cursor: pointer; display: flex; justify-content: space-between; gap: 0.75rem; align-items: center; color: var(--text-main); font-size: 0.85rem; font-weight: 700; box-shadow: 0 12px 28px -18px var(--primary-glow), inset 0 1px 0 rgba(255,255,255,0.08); transition: all 0.3s ease; }
         .quota-summary::-webkit-details-marker { display: none; }
-        .quota-summary:hover { border-color: var(--primary); background: rgba(99, 102, 241, 0.08); }
-        .quota-summary::after { content: '展开'; color: var(--text-muted); font-size: 0.75rem; font-weight: 500; }
-        .quota-details[open] .quota-summary::after { content: '收起'; }
+        .quota-summary:hover, .quota-summary:focus-visible { border-color: var(--primary); background: linear-gradient(135deg, rgba(99, 102, 241, 0.24), rgba(14, 165, 233, 0.14)); box-shadow: 0 16px 32px -18px var(--primary-glow), 0 0 0 3px rgba(99, 102, 241, 0.12); outline: none; }
+        .quota-summary-title { min-width: 0; }
+        .quota-summary::after { content: '展开细节'; color: #fff; background: var(--primary); border-radius: 999px; padding: 0.38rem 0.7rem; font-size: 0.75rem; font-weight: 700; white-space: nowrap; box-shadow: 0 10px 20px -12px var(--primary-glow); }
+        .quota-details[open] .quota-summary::after { content: '收起细节'; }
         .quota-details[open] .quota-summary { order: 2; margin-top: 0.875rem; }
-        .quota-summary-meta { color: var(--text-muted); font-size: 0.75rem; font-weight: 500; }
+        .quota-summary-meta { color: var(--text-muted); font-size: 0.75rem; font-weight: 600; margin-left: auto; white-space: nowrap; }
         .quota-body { overflow: hidden; }
         .quota-details[open] .quota-body { order: 1; }
         .quota-details.quota-animating .quota-body { will-change: height, opacity, transform; }
@@ -2811,6 +2717,10 @@ async function UsagePanel主页(TOKEN) {
                 align-items: flex-start;
                 flex-direction: column;
                 gap: 0.35rem;
+            }
+
+            .quota-summary-meta {
+                margin-left: 0;
             }
 
             .quota-group-meta {
@@ -3283,7 +3193,7 @@ async function UsagePanel主页(TOKEN) {
             const kv = resources.kv || {};
             const r2 = resources.r2 || {};
             return '<details class="quota-details">' +
-                '<summary class="quota-summary"><span>资源额度细节</span><span class="quota-summary-meta">KV / D1 / R2</span></summary>' +
+                '<summary class="quota-summary"><span class="quota-summary-title">资源额度细节</span><span class="quota-summary-meta">KV / D1 / R2</span></summary>' +
                 '<div class="quota-body"><div class="quota-list">' +
                     renderQuotaGroup('KV', formatNumber(kv.namespaces || 0) + ' 个命名空间', [
                         renderQuotaBar('读取（今日）', kv.reads, kv.readsLimit),
